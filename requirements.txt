@@ -1,0 +1,13 @@
+torch
+torchvision
+transformers
+rembg>=2.0.68
+Pillow>=10.2.0
+albumentations>=1.4.0
+opencv-python>=4.9.0.80
+datasets>=2.18.0
+tqdm>=4.66.2
+numpy==1.26.4
+huggingface_hub>=0.20.0
+pandas==2.2.1
+onnxruntime

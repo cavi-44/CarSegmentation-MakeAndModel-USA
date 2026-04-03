@@ -1,0 +1,46 @@
+# ==========================================
+# 1. ZBIORY DANYCH I WYNIKI (KRYTYCZNE)
+# ==========================================
+# Ignorujemy cały folder z danymi, zdjęciami, wycinkami i logami CSV.
+# (Git służy tylko do trzymania kodu, nie do trzymania gigabajtów zdjęć)
+data/
+
+# Opcjonalnie: Jeśli chcesz, aby sam folder 'data' istniał w repozytorium
+# (ale był pusty), musisz utworzyć w nim plik '.gitkeep' i odkomentować linię poniżej:
+# !data/.gitkeep
+
+# ==========================================
+# 2. ŚRODOWISKA WIRTUALNE PYTHON
+# ==========================================
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ==========================================
+# 3. MODELE DEEP LEARNING (Na przyszłość)
+# ==========================================
+# Ignorujemy ciężkie wagi modeli (PyTorch / Grounding DINO)
+*.pt
+*.pth
+*.weights
+*.safetensors
+runs/
+checkpoints/
+.cache/
+
+# ==========================================
+# 4. PLIKI IDE (PyCharm)
+# ==========================================
+.idea/
+*.iml
+
+# ==========================================
+# 5. PLIKI SYSTEMOWE (Windows / macOS)
+# ==========================================
+Thumbs.db
+Desktop.ini
+.DS_Store
