@@ -16,15 +16,16 @@ CROPS_DIR = "data/4_debug_crops"
 
 os.makedirs(CROPS_DIR, exist_ok=True)
 
-# --- PROGI I PARAMETRY ---
-MIN_BBOX_AREA = 3000
+# --- PROGI I PARAMETRY --- || "<- [wartosc przed update'em]"
+MIN_BBOX_AREA = 1500 # <- 3000
 VEHICLE_CLASSES = ["8", "11"]
-CROP_PADDING = 0.10  # 10% dodatkowego marginesu z każdej strony
+CROP_PADDING = 0.0 # <- 0.10
 
 # Progi oceny
 THRESHOLD_GOOD = 0.40
 THRESHOLD_MEDIUM = 0.20
-THRESHOLD_BAD = 0.12
+THRESHOLD_BAD = 0.1 # <- 0.12
+
 
 
 def get_rating(prob):
