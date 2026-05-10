@@ -11,3 +11,4 @@ numpy==1.26.4
 huggingface_hub>=0.20.0
 pandas==2.2.1
 onnxruntime
+gradio>=4.44.0
