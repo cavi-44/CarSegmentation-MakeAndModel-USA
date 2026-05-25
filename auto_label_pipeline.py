@@ -16,16 +16,14 @@ CROPS_DIR = "data/4_debug_crops"
 
 os.makedirs(CROPS_DIR, exist_ok=True)
 
-# --- PROGI I PARAMETRY --- || "<- [wartosc przed update'em]"
-MIN_BBOX_AREA = 1500 # <- 3000
+# --- PROGI I PARAMETRY ---
+MIN_BBOX_AREA = 0
 VEHICLE_CLASSES = ["8", "11"]
-CROP_PADDING = 0.0 # <- 0.10
+CROP_PADDING = 0.0
 
-# Progi oceny
 THRESHOLD_GOOD = 0.40
 THRESHOLD_MEDIUM = 0.20
-THRESHOLD_BAD = 0.1 # <- 0.12
-
+THRESHOLD_BAD = 0.1
 
 
 def get_rating(prob):
@@ -36,14 +34,60 @@ def get_rating(prob):
 
 
 def main():
-    print("Inicjalizacja Nauczyciela (CLIP) z pełną analityką Top-5...")
+    print("Inicjalizacja modelu CLIP...")
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-    class_names = [d.replace('_', ' ') for d in os.listdir(CATALOG_DIR) if os.path.isdir(os.path.join(CATALOG_DIR, d))]
-    text_prompts = [f"a photo of a {car}" for car in class_names]
+    # 1. PRZYGOTOWANIE WZORCÓW ZDJĘCIOWYCH (Obliczanie cech wizualnych klas)
+    print("Przetwarzanie zdjęć wzorcowych z katalogu...")
+    class_folders = [d for d in os.listdir(CATALOG_DIR) if os.path.isdir(os.path.join(CATALOG_DIR, d))]
+
+    class_names = []
+    reference_embeddings = []
+
+    for folder_name in class_folders:
+        class_dir = os.path.join(CATALOG_DIR, folder_name)
+        img_files = [f for f in os.listdir(class_dir) if f.endswith(('.jpg', '.png', '.jpeg'))]
+
+        if not img_files:
+            continue
+
+        images = []
+        for img_file in img_files:
+            try:
+                img_path = os.path.join(class_dir, img_file)
+                images.append(Image.open(img_path).convert("RGB"))
+            except:
+                pass
+
+        if images:
+            # Przekształcenie zdjęć wzorcowych na wektory i uśrednienie ich dla danej klasy
+            inputs = processor(images=images, return_tensors="pt", padding=True).to(device)
+            with torch.no_grad():
+                image_features = model.get_image_features(**inputs)
+
+                # Zabezpieczenie przed specyfiką wersji transformers
+                if not isinstance(image_features, torch.Tensor):
+                    image_features = getattr(image_features, 'image_embeds',
+                                             getattr(image_features, 'pooler_output', image_features[0]))
+
+                # Normalizacja każdego zdjęcia
+                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                # Uśrednienie wektorów (tworzenie "prototypu" klasy)
+                class_feature = image_features.mean(dim=0)
+                # Ponowna normalizacja prototypu
+                class_feature = class_feature / class_feature.norm(p=2, dim=-1, keepdim=True)
+
+            reference_embeddings.append(class_feature)
+            class_names.append(folder_name.replace('_', ' '))
+
+    # Złożenie wszystkich prototypów w jeden tensor dla szybkiego mnożenia macierzy
+    reference_embeddings = torch.stack(reference_embeddings).to(device)
+    logit_scale = model.logit_scale.exp().to(device)
+
+    print(f"Załadowano wzorce dla {len(class_names)} klas. Rozpoczynam analizę detekcji...")
 
     jsonl_data = []
     processed_images = 0
@@ -54,7 +98,6 @@ def main():
     with open(LOG_FILE, mode='w', newline='', encoding='utf-8') as log_f:
         log_writer = csv.writer(log_f)
 
-        # Nowe, szerokie nagłówki dla pełnej analityki
         headers = [
             "image_name", "crop_id", "bbox_coords", "area_px", "status",
             "p1_class", "p1_conf", "p1_rating",
@@ -95,7 +138,6 @@ def main():
 
                     pad_w, pad_h = w_px * CROP_PADDING, h_px * CROP_PADDING
 
-                    # Pilnujemy, by krawędzie nie wyszły poza zdjęcie
                     x_min = int(max(0, x_min_raw - pad_w))
                     y_min = int(max(0, y_min_raw - pad_h))
                     x_max = int(min(img_w, x_min_raw + w_px + pad_w))
@@ -104,21 +146,30 @@ def main():
                     bbox_area = int((x_max - x_min) * (y_max - y_min))
                     bbox_coords = f"[{x_min}, {y_min}, {x_max}, {y_max}]"
 
-                    # Filtr 1: Zbyt małe auto (N/A dla wyników)
                     if bbox_area < MIN_BBOX_AREA:
                         log_row = [img_name, bbox_idx, bbox_coords, bbox_area, "REJECTED_SIZE"]
-                        # Wypełniamy resztę kolumn pustymi wartościami
                         log_row.extend(["N/A"] * 15)
                         log_writer.writerow(log_row)
                         continue
 
-                    # Wycinanie i analiza
                     crop = image.crop((x_min, y_min, x_max, y_max))
-                    inputs = processor(text=text_prompts, images=crop, return_tensors="pt", padding=True).to(device)
+
+                    # 2. PORÓWNANIE ZDJĘCIA (CROP) ZE ZDJĘCIAMI WZORCOWYMI
+                    inputs = processor(images=crop, return_tensors="pt").to(device)
 
                     with torch.no_grad():
-                        outputs = model(**inputs)
-                        probs = outputs.logits_per_image.softmax(dim=1)
+                        crop_features = model.get_image_features(**inputs)
+
+                        # Zabezpieczenie przed specyfiką wersji transformers
+                        if not isinstance(crop_features, torch.Tensor):
+                            crop_features = getattr(crop_features, 'image_embeds',
+                                                    getattr(crop_features, 'pooler_output', crop_features[0]))
+
+                        crop_features = crop_features / crop_features.norm(p=2, dim=-1, keepdim=True)
+
+                        # Obliczanie podobieństwa cosinusowego i aplikowanie skali modelu
+                        logits_per_image = logit_scale * crop_features @ reference_embeddings.t()
+                        probs = logits_per_image.softmax(dim=1)
 
                     top_probs, top_idxs = torch.topk(probs, k=min(5, len(class_names)), dim=1)
 
@@ -128,7 +179,6 @@ def main():
                         name = class_names[top_idxs[0][i].item()]
                         results.append({"name": name, "prob": p, "rating": get_rating(p)})
 
-                    # Upewniamy się, że mamy dokładnie 5 wyników do CSV
                     while len(results) < 5:
                         results.append({"name": "N/A", "prob": 0.0, "rating": "N/A"})
 
@@ -142,7 +192,6 @@ def main():
 
                     log_writer.writerow(log_row)
 
-                    # Jeśli Top-1 jest akceptowalne, zapisujemy obrazek i do JSONL
                     if status == "ACCEPTED":
                         crop.save(os.path.join(CROPS_DIR, f"{base_name}_crop_{bbox_idx}.jpg"), quality=95)
                         image_annotations["bboxes"].append([float(x_min), float(y_min), float(x_max), float(y_max)])
@@ -158,7 +207,6 @@ def main():
         for entry in jsonl_data: f.write(json.dumps(entry, ensure_ascii=False) + '\n')
 
     print(f"\nZakończono! Przetworzono {processed_images} zdjęć, oznaczono {labeled_cars} aut.")
-    print(f"Logi ze szczegółowymi predykcjami zapisano w: {LOG_FILE}")
 
 
 if __name__ == "__main__":
