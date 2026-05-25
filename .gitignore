@@ -44,3 +44,5 @@ checkpoints/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+fine_images_to_text_converter.py
